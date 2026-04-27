@@ -1,6 +1,5 @@
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import requests
 import time
 import json
@@ -12,7 +11,7 @@ import pytz
 TELEGRAM_TOKEN = '8506498777:AAF3ui-xPOgbBe20-DRvGCj_HiN7c0uawjw'
 TELEGRAM_CHAT_ID = '6088825847'
 
-# ✅ BINANCE SETUP WITH 451 ERROR BYPASS (API1/API2/API3)
+# ✅ BINANCE SETUP WITH 451 ERROR BYPASS
 future_ex = ccxt.binance({
     'options': {'defaultType': 'future'}, 
     'enableRateLimit': True,
@@ -20,18 +19,15 @@ future_ex = ccxt.binance({
         'api': {
             'public': 'https://api1.binance.com/api/v3',
             'private': 'https://api1.binance.com/api/v3',
-        },
-        'fapiPublic': 'https://fapi.binance.com/fapi/v1',
-        'fapiPrivate': 'https://fapi.binance.com/fapi/v1',
+        }
     }
 })
 
 pkt_timezone = pytz.timezone('Asia/Karachi')
 STATE_FILE = 'state_history.json'
 
-# Global storage for volume comparisons
-prev_tickers_s4 = {}  # For Strategy 4
-prev_tickers_s5 = {}  # For Strategy 5 (BULA)
+prev_tickers_s4 = {}
+prev_tickers_s5 = {}
 
 def send_telegram(msg):
     try:
@@ -54,9 +50,7 @@ def save_states(data):
         with open(STATE_FILE, 'w') as f: json.dump(data, f)
     except: pass
 
-# ==========================================
-# STRATEGY 4: Volume Spikes (Top 15)
-# ==========================================
+# --- STRATEGY 4: Volume Spikes ---
 def run_strat_4(current_tickers):
     global prev_tickers_s4
     try:
@@ -74,14 +68,11 @@ def run_strat_4(current_tickers):
                 msg = f"🔥 *STRATEGY 4: TOP 15 VOLUME SPIKES*\n📅 {get_pkt_now()}\n\n"
                 msg += "\n".join([f"📢 {r['symbol']} (+{r['vol_change']:.1f}%)" for _, r in v_gainers.iterrows()])
                 send_telegram(msg)
-        
         prev_tickers_s4 = current_tickers
     except Exception as e:
         print(f"S4 Error: {e}")
 
-# ==========================================
-# STRATEGY 5: BULA (Full Top 20 Inline)
-# ==========================================
+# --- STRATEGY 5: BULA ---
 def run_strat_5_bula(current_tickers):
     global prev_tickers_s5
     try:
@@ -104,31 +95,30 @@ def run_strat_5_bula(current_tickers):
     except Exception as e:
         print(f"S5 Error: {e}")
 
-# --- Master Loop ---
+# --- MASTER LOOP ---
 if __name__ == "__main__":
-    send_telegram(f"🚀 *Binance Volume Bot Online*\n📍 *Region:* {future_ex.urls['api']['public']}\n🕒 *PST:* {get_pkt_now()}")
+    print("Bot is starting...")
+    send_telegram(f"🚀 *Binance Volume Bot Online*\n🕒 *PST:* {get_pkt_now()}")
     
     while True:
         try:
             hist = load_states()
             now = time.time()
-            
-            # Fetch all tickers once for both strategies
             all_tickers = future_ex.fetch_tickers()
             
-            # Run Strategy 4 every 11 minutes
+            # Strategy 4 (11 mins)
             if now - hist.get('t4', 0) >= (11 * 60):
                 run_strat_4(all_tickers)
                 hist['t4'] = now
                 save_states(hist)
             
-            # Run Strategy 5 every 30 minutes
+            # Strategy 5 (30 mins)
             if now - hist.get('t5', 0) >= (30 * 60):
                 run_strat_5_bula(all_tickers)
                 hist['t5'] = now
                 save_states(hist)
                 
-            time.sleep(30) # Check every 30 seconds
+            time.sleep(30)
             
         except Exception as e:
             print(f"Main Loop Error: {e}")

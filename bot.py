@@ -11,8 +11,7 @@ import pytz
 TELEGRAM_TOKEN = '8506498777:AAF3ui-xPOgbBe20-DRvGCj_HiN7c0uawjw'
 TELEGRAM_CHAT_ID = '6088825847'
 
-# Railway quota bachane ke liye interval
-CHECK_INTERVAL = 600  
+CHECK_INTERVAL = 600  # 10 Minutes pause between each cycle
 
 future_ex = ccxt.binance({
     'options': {'defaultType': 'future'}, 
@@ -22,14 +21,19 @@ pkt_timezone = pytz.timezone('Asia/Karachi')
 
 STATE_FILE = 'state_history.json'
 
+# Global storage
 prev_tickers_s4 = {}
 prev_tickers_s5 = {}
 
 def send_telegram(msg):
+    # 🚨 FIX: "Markdown" hata diya gaya hai taake message crash na ho
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+        response = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
+        if response.status_code != 200:
+            print(f"Telegram Error: {response.text}")
+    except Exception as e:
+        print(f"Failed to send to Telegram: {e}")
 
 def get_pkt_now():
     return datetime.now(pkt_timezone).strftime('%d-%m-%Y | %I:%M %p')
@@ -46,6 +50,9 @@ def save_states(data):
         with open(STATE_FILE, 'w') as f: json.dump(data, f)
     except: pass
 
+# ==========================================
+# STRATEGY 4: Volume Spikes (Top 15)
+# ==========================================
 def run_strat_4(current_tickers):
     global prev_tickers_s4
     try:
@@ -57,14 +64,19 @@ def run_strat_4(current_tickers):
                     if old_v > 0:
                         vol_change = ((new_v - old_v) / old_v) * 100
                         vol_stats.append({'symbol': s, 'vol_change': vol_change})
-            if vol_stats:
-                v_gainers = pd.DataFrame(vol_stats).nlargest(15, 'vol_change')
-                msg = f"🔥 *STRATEGY 4: TOP 15 VOLUME SPIKES*\n📅 {get_pkt_now()}\n\n"
-                msg += "\n".join([f"📢 {r['symbol']} (+{r['vol_change']:.1f}%)" for _, r in v_gainers.iterrows()])
-                send_telegram(msg)
+        if vol_stats:
+            v_gainers = pd.DataFrame(vol_stats).nlargest(15, 'vol_change')
+            msg = f"🔥 STRATEGY 4: TOP 15 VOLUME SPIKES\n📅 {get_pkt_now()}\n\n"
+            msg += "\n".join([f"📢 {r['symbol']} (+{r['vol_change']:.1f}%)" for _, r in v_gainers.iterrows()])
+            send_telegram(msg)
         prev_tickers_s4 = current_tickers
-    except: pass
+    except Exception as e:
+        # 🚨 FIX: Ab Strategy 4 mein error aayega toh Telegram par msg aayega
+        send_telegram(f"⚠️ Strategy 4 Error: {e}")
 
+# ==========================================
+# STRATEGY 5: BULA (Full Top 20 Inline)
+# ==========================================
 def run_strat_5_bula(current_tickers):
     global prev_tickers_s5
     try:
@@ -80,31 +92,43 @@ def run_strat_5_bula(current_tickers):
         
         if stats:
             v_gainers = pd.DataFrame(stats).nlargest(20, 'change')
-            inline_str = " | ".join([f"*{r['symbol']}* (+{r['change']:.1f}%)" for _, r in v_gainers.iterrows()])
-            send_telegram(f"🐂 *STRATEGY 5: BULA (Top 20)*\n📅 {get_pkt_now()}\n\n{inline_str}")
+            inline_str = " | ".join([f"{r['symbol']} (+{r['change']:.1f}%)" for _, r in v_gainers.iterrows()])
+            send_telegram(f"🐂 STRATEGY 5: BULA (Top 20)\n📅 {get_pkt_now()}\n\n{inline_str}")
             
         prev_tickers_s5 = current_tickers
-    except: pass
+    except Exception as e:
+        # 🚨 FIX: Ab Strategy 5 mein error aayega toh Telegram par msg aayega
+        send_telegram(f"⚠️ Strategy 5 Error: {e}")
 
+# --- Master Loop ---
 if __name__ == "__main__":
-    send_telegram(f"✅ *Binance Volume Bot is Online*\n📍 Location: Railway Cloud\n📅 Time: {get_pkt_now()}\n\nStrategies Active: 4 & 5")
+    send_telegram(f"✅ Bot Code Updated & Online\n📍 Location: Railway Cloud\n📅 Time: {get_pkt_now()}")
     
     while True:
         try:
             hist = load_states()
             now_ts = time.time()
+            
+            # Fetch all tickers once per cycle
             all_tickers = future_ex.fetch_tickers()
             
+            # Run Strategy 4 (Interval: 11m)
             if now_ts - hist.get('t4', 0) >= (11 * 60):
                 run_strat_4(all_tickers)
                 hist['t4'] = now_ts
             
+            # Run Strategy 5 (Interval: 30m)
             if now_ts - hist.get('t5', 0) >= (30 * 60):
                 run_strat_5_bula(all_tickers)
                 hist['t5'] = now_ts
             
             save_states(hist)
+            print(f"Cycle completed at {get_pkt_now()}. Sleeping for {CHECK_INTERVAL}s...")
             time.sleep(CHECK_INTERVAL)
 
-        except:
+        except Exception as e:
+            # 🚨 FIX: Agar Binance IP block karega, toh Telegram par bata dega!
+            error_msg = f"⚠️ CRITICAL ERROR (Binance ya Network ka masla):\n{str(e)}"
+            print(error_msg)
+            send_telegram(error_msg)
             time.sleep(60)
